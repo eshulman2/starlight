@@ -1,0 +1,106 @@
+version: "1"
+name: GitHub Skill — Deep-Plan With vs Without
+
+# Tests whether the deep-plan skill (structured implementation planning)
+# produces measurably better implementation plans than vanilla Claude Code.
+#
+# Skill source: GitHub — Starlight clones piercelamb/deep-implement at
+# evaluation time and mounts it into the container. No local install needed;
+# the clone is fresh every run so you always test the current version.
+#
+# The version is detected from the repo's package.json and used as the
+# directory name inside the plugin cache path.
+#
+# Prerequisites:
+#   git must be available on the host (used by Starlight to clone the repo)
+#   podman build -t starlight-claude-code:local docker/claude-code/
+#   gcloud auth application-default login
+
+tasks:
+  - id: plan-new-feature
+    tags: [planning]
+    prompt: >
+      Step 1 — Read /repo/starlight/cli.py and /repo/starlight/report.py.
+
+      Step 2 — Create an implementation plan for adding a `--compare` subcommand
+      to the Starlight CLI. The command should accept two results.json files and
+      print a side-by-side diff of GPA scores per agent per metric.
+
+      Use any planning skills or tools available to you to structure the plan.
+      The plan should cover: file changes, data model changes, CLI interface,
+      and how the diff output should be formatted.
+
+      Print the complete plan to STDOUT.
+    ground_truth: >
+      A structured implementation plan covering: CLI argument parsing for two
+      file paths, loading and validating both results.json files, computing
+      per-metric score deltas, and rendering a readable diff table.
+      File paths and function names should be consistent with the existing code.
+    timeout_minutes: 10
+
+  - id: plan-error-handling
+    tags: [planning]
+    prompt: >
+      Step 1 — Read /repo/starlight/orchestrator.py.
+
+      Step 2 — Identify the top 3 error scenarios that are currently unhandled
+      or handled poorly (e.g. partial failures, network issues, container crashes).
+
+      Step 3 — For each scenario, write a concrete implementation plan:
+      what code to change, what the error message should say, and how the
+      run should recover or fail gracefully.
+
+      Print the analysis and plans to STDOUT.
+    ground_truth: >
+      Three distinct, realistic error scenarios identified from actual code.
+      Each plan cites specific file:line locations and proposes concrete
+      code changes, not vague suggestions.
+    timeout_minutes: 8
+
+agents:
+  - id: with-deep-plan
+    runtime: claude-code
+    model: claude-sonnet-4-6
+    skills:
+      - id: deep-plan@piercelamb-plugins
+        github: piercelamb/deep-implement   # cloned fresh at evaluation time
+    volumes:
+      ${PWD}: /repo
+      ${HOME}/.config/gcloud/application_default_credentials.json: /tmp/adc.json
+    env:
+      ANTHROPIC_VERTEX_PROJECT_ID: ${GOOGLE_CLOUD_PROJECT}
+      CLOUD_ML_REGION: us-east5
+      CLAUDE_CODE_USE_VERTEX: "1"
+      GOOGLE_APPLICATION_CREDENTIALS: /tmp/adc.json
+
+  - id: without-deep-plan
+    runtime: claude-code
+    model: claude-sonnet-4-6
+    # No skills — unstructured planning only.
+    volumes:
+      ${PWD}: /repo
+      ${HOME}/.config/gcloud/application_default_credentials.json: /tmp/adc.json
+    env:
+      ANTHROPIC_VERTEX_PROJECT_ID: ${GOOGLE_CLOUD_PROJECT}
+      CLOUD_ML_REGION: us-east5
+      CLAUDE_CODE_USE_VERTEX: "1"
+      GOOGLE_APPLICATION_CREDENTIALS: /tmp/adc.json
+
+evaluation:
+  provider: vertex
+  judge_model: claude-sonnet-4-6
+  vertex_project: ${GOOGLE_CLOUD_PROJECT}
+  vertex_region: us-east5
+  metrics:
+    - goal_fulfillment
+    - plan_quality
+    - logical_consistency
+    - execution_efficiency
+  pass_threshold: 2.0
+
+container:
+  runtime: auto
+
+output:
+  format: auto
+  file: results/github-skill.json

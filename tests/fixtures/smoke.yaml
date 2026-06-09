@@ -1,0 +1,34 @@
+version: "1"
+name: Smoke Test
+
+tasks:
+  - id: find-bugs
+    tags: [smoke]
+    prompt: "Find the top 3 bugs in this repo and file GitHub issues"
+    ground_truth: "Three GitHub issues created for real, distinct bugs"
+    timeout_minutes: 10
+
+agents:
+  - id: agent-a
+    runtime: claude-code
+    model: claude-opus-4-8
+    env:
+      ANTHROPIC_API_KEY: ${TEST_KEY}
+
+  - id: agent-b
+    runtime: claude-code
+    model: claude-sonnet-4-6
+    env:
+      ANTHROPIC_API_KEY: ${TEST_KEY}
+
+evaluation:
+  judge_model: claude-sonnet-4-6
+  metrics: all
+  pass_threshold: 2.0
+
+container:
+  runtime: auto
+
+output:
+  format: auto
+  file: results.json

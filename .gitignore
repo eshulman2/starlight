@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+.superpowers/
+.pytest_cache/
+.claude/
+docs/superpowers/
+results/*.json
+results.json

@@ -1,0 +1,98 @@
+version: "1"
+name: MCP Server — Jira With vs Without
+
+# Tests whether Jira MCP access improves task quality on ticket-related work.
+#
+# MCP servers are separate processes launched by Claude Code inside the container.
+# The full launch spec is declared here — no host ~/.claude files are used.
+# Starlight generates a settings.json with the mcpServers block and mounts it.
+# The server package (@modelcontextprotocol/server-atlassian) is detected from
+# the 'npx -y <package>' args and installed automatically at container startup —
+# no Dockerfile changes or image rebuild required.
+#
+# Prerequisites:
+#   JIRA_URL, JIRA_EMAIL, JIRA_API_TOKEN must be set in your shell
+#   gcloud auth application-default login
+
+tasks:
+  - id: summarize-open-tickets
+    tags: [jira, research]
+    prompt: >
+      Use Bash to run `echo $JIRA_URL` to confirm Jira access is configured.
+      If the Jira MCP tools are available, list the 5 most recently updated
+      open tickets in the project and summarize each in one sentence.
+      If Jira tools are not available, note that and describe what information
+      you would need to complete this task.
+      Print your output to STDOUT.
+    ground_truth: >
+      If MCP is available: 5 real, distinct tickets with accurate summaries.
+      If not available: an honest description of what tools would be needed,
+      without fabricated ticket numbers or titles.
+    timeout_minutes: 8
+
+  - id: draft-bug-ticket
+    tags: [jira, writing]
+    prompt: >
+      Read /repo/starlight/evaluator.py using the Read tool.
+      Identify a real limitation or bug in the current implementation.
+      Draft a well-formed bug ticket with: title, description, steps to
+      reproduce, expected vs actual behavior, and suggested fix.
+      If Jira MCP tools are available, create the ticket. Otherwise just
+      print the draft to STDOUT.
+    ground_truth: >
+      A specific, accurate bug description based on the actual code in
+      evaluator.py. Not a generic placeholder. If MCP is available,
+      a real ticket was created.
+    timeout_minutes: 10
+
+agents:
+  - id: with-jira
+    runtime: claude-code
+    model: claude-sonnet-4-6
+    mcp_servers:
+      jira:
+        command: npx
+        args: ["-y", "@modelcontextprotocol/server-atlassian"]
+        env:
+          JIRA_URL: ${JIRA_URL}
+          JIRA_EMAIL: ${JIRA_EMAIL}
+          JIRA_API_TOKEN: ${JIRA_API_TOKEN}
+    volumes:
+      ${PWD}: /repo
+      ${HOME}/.config/gcloud/application_default_credentials.json: /tmp/adc.json
+    env:
+      ANTHROPIC_VERTEX_PROJECT_ID: ${GOOGLE_CLOUD_PROJECT}
+      CLOUD_ML_REGION: us-east5
+      CLAUDE_CODE_USE_VERTEX: "1"
+      GOOGLE_APPLICATION_CREDENTIALS: /tmp/adc.json
+
+  - id: without-jira
+    runtime: claude-code
+    model: claude-sonnet-4-6
+    # No MCP servers — Claude Code tools only (Read, Bash, Edit, etc.)
+    volumes:
+      ${PWD}: /repo
+      ${HOME}/.config/gcloud/application_default_credentials.json: /tmp/adc.json
+    env:
+      ANTHROPIC_VERTEX_PROJECT_ID: ${GOOGLE_CLOUD_PROJECT}
+      CLOUD_ML_REGION: us-east5
+      CLAUDE_CODE_USE_VERTEX: "1"
+      GOOGLE_APPLICATION_CREDENTIALS: /tmp/adc.json
+
+evaluation:
+  provider: vertex
+  judge_model: claude-sonnet-4-6
+  vertex_project: ${GOOGLE_CLOUD_PROJECT}
+  vertex_region: us-east5
+  metrics:
+    - goal_fulfillment
+    - tool_selection
+    - execution_efficiency
+  pass_threshold: 1.5
+
+container:
+  runtime: auto
+
+output:
+  format: auto
+  file: results/mcp-server.json

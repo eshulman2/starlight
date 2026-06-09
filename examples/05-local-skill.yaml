@@ -1,0 +1,104 @@
+version: "1"
+name: Local Skill — Context7 With vs Without
+
+# Tests whether the context7 skill (live documentation lookup) meaningfully
+# improves accuracy when writing code against a specific SDK.
+#
+# context7@claude-plugins-official adds a /context7 tool that fetches
+# up-to-date library documentation directly. Without it, the agent works
+# from training-data knowledge which may be stale.
+#
+# Skill source: local — Starlight finds context7 in ~/.claude/plugins/cache/
+# and mounts it into the container. The host install is read-only; the
+# container gets exactly that one skill and nothing else.
+#
+# Prerequisites:
+#   Install context7 locally if you haven't:
+#     claude skill install context7@claude-plugins-official
+#   Then rebuild the image if needed:
+#     podman build -t starlight-claude-code:local docker/claude-code/
+#   gcloud auth application-default login
+
+tasks:
+  - id: sdk-code-example
+    tags: [coding, sdk]
+    prompt: >
+      Step 1 — use the Context7 tool (/context7) to look up the current
+      Anthropic Python SDK documentation for `client.messages.create()`.
+      If Context7 is not available, use Bash to run
+      `cat /repo/pyproject.toml | grep anthropic` to find the version.
+
+      Step 2 — write a complete, runnable Python function called
+      `score_agent_response(prompt, response, ground_truth)` that calls
+      the Anthropic API to judge whether `response` answers `prompt`
+      relative to `ground_truth`. Return a dict with keys: score (0-3),
+      rationale (str).
+
+      Step 3 — print the complete function to STDOUT.
+    ground_truth: >
+      A syntactically correct Python function that uses the Anthropic client,
+      calls messages.create() with correct parameters (model, max_tokens,
+      messages list), and returns a dict with score and rationale keys.
+      No fabricated parameter names or API shapes.
+    timeout_minutes: 8
+
+  - id: evaluate-sdk-version
+    tags: [research]
+    prompt: >
+      Use Bash to run `cat /repo/pyproject.toml` and find the anthropic
+      dependency version. Then use Context7 (if available) to look up what
+      changed in that version of the Anthropic Python SDK compared to the
+      previous major version. Print a bullet-point summary of the key changes.
+      If Context7 is not available, note that and describe what you know
+      from training data, flagging it as potentially stale.
+    ground_truth: >
+      Correct version number from pyproject.toml. If Context7 was used,
+      an accurate changelog summary. If not available, the response
+      explicitly acknowledges the limitation.
+    timeout_minutes: 6
+
+agents:
+  - id: with-context7
+    runtime: claude-code
+    model: claude-sonnet-4-6
+    skills:
+      - context7@claude-plugins-official   # local: from ~/.claude/plugins/cache/
+    volumes:
+      ${PWD}: /repo
+      ${HOME}/.config/gcloud/application_default_credentials.json: /tmp/adc.json
+    env:
+      ANTHROPIC_VERTEX_PROJECT_ID: ${GOOGLE_CLOUD_PROJECT}
+      CLOUD_ML_REGION: us-east5
+      CLAUDE_CODE_USE_VERTEX: "1"
+      GOOGLE_APPLICATION_CREDENTIALS: /tmp/adc.json
+
+  - id: without-context7
+    runtime: claude-code
+    model: claude-sonnet-4-6
+    # No skills — works from training data only.
+    volumes:
+      ${PWD}: /repo
+      ${HOME}/.config/gcloud/application_default_credentials.json: /tmp/adc.json
+    env:
+      ANTHROPIC_VERTEX_PROJECT_ID: ${GOOGLE_CLOUD_PROJECT}
+      CLOUD_ML_REGION: us-east5
+      CLAUDE_CODE_USE_VERTEX: "1"
+      GOOGLE_APPLICATION_CREDENTIALS: /tmp/adc.json
+
+evaluation:
+  provider: vertex
+  judge_model: claude-sonnet-4-6
+  vertex_project: ${GOOGLE_CLOUD_PROJECT}
+  vertex_region: us-east5
+  metrics:
+    - goal_fulfillment
+    - tool_selection
+    - logical_consistency
+  pass_threshold: 2.0
+
+container:
+  runtime: auto
+
+output:
+  format: auto
+  file: results/local-skill.json

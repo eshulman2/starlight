@@ -1,0 +1,65 @@
+version: "1"
+name: Model Comparison — Opus vs Sonnet
+
+# This scenario compares two Claude models on the same task.
+# Both agents get identical tools and instructions; only the model differs.
+# Use it to decide which model is worth its higher cost for your specific workload.
+#
+# Prerequisites:
+#   podman build -t starlight-claude-code:local docker/claude-code/
+#   gcloud auth application-default login
+
+tasks:
+  - id: summarize-repo
+    tags: [quick, writing]
+    prompt: >
+      Use the Bash tool to run `ls /repo` and `cat /repo/README.md`.
+      Then use Read to open any source files you need to understand the project.
+      Based only on what you actually read, write a concise technical summary
+      (200 words max) explaining what the project does, its main components,
+      and how to get started. Print the summary to STDOUT.
+    ground_truth: >
+      A clear, accurate summary covering: project purpose, key components
+      (CLI, YAML config, container orchestration, GPA evaluation, reporting),
+      and a "get started" pointer. Under 200 words.
+    timeout_minutes: 5
+
+agents:
+  - id: opus
+    runtime: claude-code
+    model: claude-opus-4-8
+    volumes:
+      ${PWD}: /repo
+      ${HOME}/.config/gcloud/application_default_credentials.json: /tmp/adc.json
+    env:
+      ANTHROPIC_VERTEX_PROJECT_ID: ${GOOGLE_CLOUD_PROJECT}
+      CLOUD_ML_REGION: us-east5
+      CLAUDE_CODE_USE_VERTEX: "1"
+      GOOGLE_APPLICATION_CREDENTIALS: /tmp/adc.json
+
+  - id: sonnet
+    runtime: claude-code
+    model: claude-sonnet-4-6
+    volumes:
+      ${PWD}: /repo
+      ${HOME}/.config/gcloud/application_default_credentials.json: /tmp/adc.json
+    env:
+      ANTHROPIC_VERTEX_PROJECT_ID: ${GOOGLE_CLOUD_PROJECT}
+      CLOUD_ML_REGION: us-east5
+      CLAUDE_CODE_USE_VERTEX: "1"
+      GOOGLE_APPLICATION_CREDENTIALS: /tmp/adc.json
+
+evaluation:
+  provider: vertex
+  judge_model: claude-sonnet-4-6
+  vertex_project: ${GOOGLE_CLOUD_PROJECT}
+  vertex_region: us-east5
+  metrics: all
+  pass_threshold: 2.0
+
+container:
+  runtime: auto
+
+output:
+  format: auto
+  file: results/model-comparison.json

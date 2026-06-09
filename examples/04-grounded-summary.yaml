@@ -1,0 +1,74 @@
+version: "1"
+name: Grounded Summary — Opus vs Sonnet
+
+# Same task as 01-model-comparison.yaml but with a structured, mandatory
+# reading sequence. Tests whether explicit step-by-step instructions reduce
+# hallucination compared to the open-ended "read what you need" version.
+#
+# Prerequisites:
+#   podman build -t starlight-claude-code:local docker/claude-code/
+#   gcloud auth application-default login
+
+tasks:
+  - id: grounded-summarize-repo
+    tags: [grounded, writing]
+    prompt: >
+      Follow these steps in order. Do not skip any step.
+
+      Step 1 — Bash: run `ls /repo`
+      Step 2 — Bash: run `cat /repo/README.md`
+      Step 3 — Read: open /repo/starlight/orchestrator.py
+      Step 4 — Read: open /repo/starlight/evaluator.py
+      Step 5 — Read: open /repo/starlight/cli.py
+
+      After completing all five steps, write a technical summary (200 words max)
+      of what the project does, its main components, and how to get started.
+      For each claim in your summary, state which file (Step 1-5) it came from.
+      Do not include anything you did not read in Steps 1-5.
+    ground_truth: >
+      A clear, accurate summary covering: project purpose (AI agent evaluation harness),
+      key components (CLI run command, YAML config, container orchestration, GPA evaluation,
+      report rendering), and a "get started" pointer. Under 200 words.
+      Claims are grounded — each one cites which step/file it came from.
+      No fabricated details about files not in Steps 1-5.
+    timeout_minutes: 8
+
+agents:
+  - id: opus
+    runtime: claude-code
+    model: claude-opus-4-8
+    volumes:
+      ${PWD}: /repo
+      ${HOME}/.config/gcloud/application_default_credentials.json: /tmp/adc.json
+    env:
+      ANTHROPIC_VERTEX_PROJECT_ID: ${GOOGLE_CLOUD_PROJECT}
+      CLOUD_ML_REGION: us-east5
+      CLAUDE_CODE_USE_VERTEX: "1"
+      GOOGLE_APPLICATION_CREDENTIALS: /tmp/adc.json
+
+  - id: sonnet
+    runtime: claude-code
+    model: claude-sonnet-4-6
+    volumes:
+      ${PWD}: /repo
+      ${HOME}/.config/gcloud/application_default_credentials.json: /tmp/adc.json
+    env:
+      ANTHROPIC_VERTEX_PROJECT_ID: ${GOOGLE_CLOUD_PROJECT}
+      CLOUD_ML_REGION: us-east5
+      CLAUDE_CODE_USE_VERTEX: "1"
+      GOOGLE_APPLICATION_CREDENTIALS: /tmp/adc.json
+
+evaluation:
+  provider: vertex
+  judge_model: claude-sonnet-4-6
+  vertex_project: ${GOOGLE_CLOUD_PROJECT}
+  vertex_region: us-east5
+  metrics: all
+  pass_threshold: 2.0
+
+container:
+  runtime: auto
+
+output:
+  format: auto
+  file: results/grounded-summary.json

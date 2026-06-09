@@ -1,0 +1,109 @@
+version: "1"
+name: Skill Comparison — With vs Without GitHub MCP
+
+# Tests whether the GitHub MCP server meaningfully improves performance on
+# code-review tasks. Agent A gets the GitHub MCP server; Agent B does not.
+#
+# MCP servers are declared inline — no host ~/.claude files are used.
+# Starlight generates a settings.json from the mcp_servers block and mounts it.
+# The server package (@modelcontextprotocol/server-github) is detected from the
+# 'npx -y <package>' args and installed automatically inside the container at
+# startup — no Dockerfile changes or image rebuild required.
+#
+# Prerequisites:
+#   GITHUB_TOKEN set in your shell
+#   gcloud auth application-default login
+
+tasks:
+  - id: find-open-issues
+    tags: [github, research]
+    prompt: >
+      Use Bash to run `cd /repo && git remote get-url origin` to find the GitHub repo URL.
+      Then use your GitHub MCP tools (or gh CLI) to list the 3 most recently opened issues.
+      For each issue print: issue number, title, and a one-sentence description of
+      what the reporter is asking for.
+    ground_truth: >
+      Three distinct, recently-opened issues are identified with accurate
+      numbers, titles, and one-sentence descriptions that match the actual
+      issue content.
+    timeout_minutes: 8
+
+  - id: draft-bug-fix
+    tags: [coding]
+    prompt: >
+      Use Bash to run `grep -rn "TODO\|FIXME\|BUG" /repo/starlight` to find actionable issues.
+      Also run `cat /repo/results/model-comparison.json 2>/dev/null || echo "no results yet"`.
+      Pick the most actionable item you find and use Read + Edit to write a minimal code fix.
+      Print a diff or description of exactly what you changed and why.
+    ground_truth: >
+      A concrete, syntactically correct code change is proposed that
+      addresses a real bug or TODO. The explanation clearly states what
+      was wrong and what the fix does.
+    timeout_minutes: 10
+
+agents:
+  - id: with-github
+    runtime: claude-code
+    model: claude-sonnet-4-6
+    # Skills = Claude Code plugins (controls enabledPlugins in settings.json).
+    # Three ways to declare a skill:
+    #
+    #   String (local)   — Starlight finds the skill in ~/.claude/plugins/cache/
+    #                      and mounts it into the container automatically.
+    #   - superpowers@claude-plugins-official
+    #
+    #   Object (GitHub)  — Starlight clones the repo fresh at evaluation time.
+    #                      No host files used; reproducible across machines.
+    #   - id: my-tool@my-org
+    #     github: my-org/my-claude-skill
+    #
+    # The agent below uses a locally installed skill AND an MCP server.
+    skills:
+      - superpowers@claude-plugins-official   # local: from ~/.claude/plugins/cache/
+    # MCP servers = separate processes Claude Code launches inside the container.
+    # Starlight generates a fresh settings.json for this agent only.
+    mcp_servers:
+      github:
+        command: npx
+        args: ["-y", "@modelcontextprotocol/server-github"]
+        env:
+          GITHUB_TOKEN: ${GITHUB_TOKEN}
+    volumes:
+      ${PWD}: /repo
+      ${HOME}/.config/gcloud/application_default_credentials.json: /tmp/adc.json
+    env:
+      ANTHROPIC_VERTEX_PROJECT_ID: ${GOOGLE_CLOUD_PROJECT}
+      CLOUD_ML_REGION: us-east5
+      CLAUDE_CODE_USE_VERTEX: "1"
+      GOOGLE_APPLICATION_CREDENTIALS: /tmp/adc.json
+
+  - id: without-github
+    runtime: claude-code
+    model: claude-sonnet-4-6
+    # No mcp_servers — this agent has no MCP tools, by design.
+    volumes:
+      ${PWD}: /repo
+      ${HOME}/.config/gcloud/application_default_credentials.json: /tmp/adc.json
+    env:
+      ANTHROPIC_VERTEX_PROJECT_ID: ${GOOGLE_CLOUD_PROJECT}
+      CLOUD_ML_REGION: us-east5
+      CLAUDE_CODE_USE_VERTEX: "1"
+      GOOGLE_APPLICATION_CREDENTIALS: /tmp/adc.json
+
+evaluation:
+  provider: vertex
+  judge_model: claude-sonnet-4-6
+  vertex_project: ${GOOGLE_CLOUD_PROJECT}
+  vertex_region: us-east5
+  metrics:
+    - goal_fulfillment
+    - tool_selection
+    - execution_efficiency
+  pass_threshold: 1.5
+
+container:
+  runtime: auto
+
+output:
+  format: auto
+  file: results/skill-comparison.json

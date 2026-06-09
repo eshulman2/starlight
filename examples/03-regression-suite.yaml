@@ -1,0 +1,95 @@
+version: "1"
+name: Regression Suite — Core Capabilities
+
+# A multi-task regression suite to run before shipping a new agent version.
+# Tests breadth: file reading, web research, code generation, and synthesis.
+# Tag filtering lets you run just a subset:
+#   starlight run 03-regression-suite.yaml --tag smoke   # quick sanity check
+#   starlight run 03-regression-suite.yaml --tag full    # complete suite
+#
+# Prerequisites:
+#   podman build -t starlight-claude-code:local docker/claude-code/
+#   gcloud auth application-default login
+
+tasks:
+  - id: read-and-explain
+    tags: [smoke, reading]
+    prompt: >
+      Use Read to open /repo/starlight/orchestrator.py and read the whole file.
+      Then explain in plain English: what the Orchestrator class does, what its
+      public interface is, and what happens if a container fails mid-run.
+      No code needed — prose only. Print your explanation to STDOUT.
+    ground_truth: >
+      Accurate description of: Orchestrator creates a network and collector,
+      runs agents concurrently per task, evaluates GPA after collector stops,
+      cleans up in finally block. Correctly identifies that container failures
+      return a failed AgentRun rather than crashing the whole run.
+    timeout_minutes: 5
+
+  - id: write-unit-test
+    tags: [smoke, coding]
+    prompt: >
+      First use Read to open /repo/starlight/report.py and find the `_bar` function.
+      Then write a new pytest unit test that covers: score=0, score=3, score=None,
+      and an intermediate value. Use only stdlib and pytest — no mocks needed.
+      Print the complete test code to STDOUT.
+    ground_truth: >
+      Valid pytest test function(s) that import `_bar` from starlight.report
+      and assert correct output for all four cases. Tests are syntactically
+      correct and would pass if run.
+    timeout_minutes: 8
+
+  - id: refactor-suggestion
+    tags: [full, analysis]
+    prompt: >
+      Use Read to open /repo/starlight/evaluator.py and read the entire file.
+      Identify one specific improvement that would make it more robust or readable
+      without changing its external interface. Print: the problem, the proposed change,
+      and a before/after diff showing exactly what to change.
+    ground_truth: >
+      A concrete, specific improvement is identified (not vague "add more
+      error handling"). The before/after diff is syntactically correct and
+      the proposed change would not break the public interface.
+    timeout_minutes: 10
+
+  - id: summarize-changes
+    tags: [full, git]
+    prompt: >
+      Use Bash to run `cd /repo && git log --oneline` and read the full output.
+      Summarize the development history in chronological order, grouping commits
+      by theme (e.g. "scaffold", "core pipeline", "bug fixes"). For each group
+      write 1-2 sentences describing what changed. Print the summary to STDOUT.
+    ground_truth: >
+      An accurate, chronologically-ordered summary that correctly groups the
+      commits (scaffold, models/config, containers, adapters/OTel,
+      evaluator/report, CLI, fixes) with descriptions matching what
+      each commit actually changed.
+    timeout_minutes: 6
+
+agents:
+  - id: candidate
+    runtime: claude-code
+    model: claude-sonnet-4-6
+    volumes:
+      ${PWD}: /repo
+      ${HOME}/.config/gcloud/application_default_credentials.json: /tmp/adc.json
+    env:
+      ANTHROPIC_VERTEX_PROJECT_ID: ${GOOGLE_CLOUD_PROJECT}
+      CLOUD_ML_REGION: us-east5
+      CLAUDE_CODE_USE_VERTEX: "1"
+      GOOGLE_APPLICATION_CREDENTIALS: /tmp/adc.json
+
+evaluation:
+  provider: vertex
+  judge_model: claude-sonnet-4-6
+  vertex_project: ${GOOGLE_CLOUD_PROJECT}
+  vertex_region: us-east5
+  metrics: all
+  pass_threshold: 2.0
+
+container:
+  runtime: auto
+
+output:
+  format: auto
+  file: results/regression.json
