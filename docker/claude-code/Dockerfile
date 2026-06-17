@@ -54,6 +54,12 @@ ENV PATH="/home/agent/.npm-global/bin:$PATH"
 # The transcript.jsonl file is written here and read back by the host after the run.
 RUN mkdir -p /workspace && chown agent:agent /workspace
 
+# Pre-create ~/.claude so that when Starlight mounts settings.json at
+# /home/agent/.claude/settings.json the directory already exists and is owned
+# by agent. Without this, Podman creates the parent directory as root, which
+# blocks Claude Code from writing its own session files (transcripts, etc).
+RUN mkdir -p /home/agent/.claude && chown -R agent:agent /home/agent/.claude
+
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh && chown agent:agent /entrypoint.sh
 

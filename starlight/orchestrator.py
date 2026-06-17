@@ -302,7 +302,13 @@ class Orchestrator:
             except Exception as exc:
                 logging.getLogger(__name__).warning("Could not parse transcript: %s", exc)
 
-        # Fall back to last log line if no transcript response was found
+        # If no transcript response, try claude_output.txt (captures raw claude output
+        # including error messages when Claude Code fails before writing a session).
+        if not final_response:
+            output_file = agent_work_dir / "claude_output.txt"
+            if output_file.exists():
+                final_response = output_file.read_text().strip() or None
+        # Last fallback: last container log line
         if not final_response:
             final_response = logs.strip().splitlines()[-1] if logs.strip() else None
 

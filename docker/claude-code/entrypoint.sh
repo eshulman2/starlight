@@ -43,10 +43,14 @@ touch /tmp/.starlight_start
 
 # Run Claude Code in non-interactive (print) mode.
 # --dangerously-skip-permissions lets the agent use tools without prompting.
-# Errors are non-fatal — the GPA judge scores whatever the agent produced.
+# Output is saved to claude_output.txt AND shown in container logs.
+# If no JSONL transcript is written (startup failure, MCP connect error, etc.)
+# the captured output becomes the agent's response so the GPA judge can explain it.
+CLAUDE_OUTPUT_FILE="/workspace/claude_output.txt"
 claude -p "$TASK_PROMPT" \
     --dangerously-skip-permissions \
-    2>&1 || true
+    2>&1 | tee "$CLAUDE_OUTPUT_FILE" || true
+chmod 644 "$CLAUDE_OUTPUT_FILE" 2>/dev/null || true
 
 echo "=== Starlight Agent: task complete ==="
 
@@ -61,5 +65,5 @@ if [ -n "$TRANSCRIPT" ]; then
     chmod 644 "$TRANSCRIPT_DEST"   # make readable by the host orchestrator
     echo "Transcript saved: $TRANSCRIPT_DEST ($(wc -l < "$TRANSCRIPT_DEST") lines)"
 else
-    echo "WARNING: No transcript found — tool call data will be empty"
+    echo "WARNING: No transcript found — claude_output.txt has the raw response"
 fi
