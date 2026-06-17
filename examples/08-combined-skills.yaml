@@ -11,8 +11,8 @@ name: Combined — All Extension Types
 # vs a clean agent — e.g. before deciding which extensions justify the
 # setup cost for a given task type.
 #
-# The GitHub MCP server package is auto-detected from the 'npx -y <package>'
-# args and installed at container startup — no Dockerfile changes needed.
+# The GitHub MCP server uses the remote HTTP endpoint (api.githubcopilot.com/mcp)
+# — no binary to install, no container changes needed.
 # Skills are mounted from the host or cloned from GitHub by the orchestrator.
 #
 # Prerequisites:
@@ -53,13 +53,13 @@ agents:
     # skills:
     #   - id: deep-project@piercelamb-plugins
     #     github: piercelamb/deep-implement
-    # MCP server (binary must be in the container image)
+    # HTTP MCP server — connects to GitHub Copilot remote endpoint directly
     mcp_servers:
       github:
-        command: npx
-        args: ["-y", "@modelcontextprotocol/server-github"]
-        env:
-          GITHUB_TOKEN: ${GITHUB_TOKEN}
+        type: http
+        url: https://api.githubcopilot.com/mcp
+        headers:
+          Authorization: "Bearer ${GITHUB_TOKEN}"
     volumes:
       ${PWD}: /repo
       ${HOME}/.config/gcloud/application_default_credentials.json: /tmp/adc.json

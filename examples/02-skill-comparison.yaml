@@ -4,14 +4,12 @@ name: Skill Comparison — With vs Without GitHub MCP
 # Tests whether the GitHub MCP server meaningfully improves performance on
 # code-review tasks. Agent A gets the GitHub MCP server; Agent B does not.
 #
-# MCP servers are declared inline — no host ~/.claude files are used.
-# Starlight generates a settings.json from the mcp_servers block and mounts it.
-# The server package (@modelcontextprotocol/server-github) is detected from the
-# 'npx -y <package>' args and installed automatically inside the container at
-# startup — no Dockerfile changes or image rebuild required.
+# Uses the GitHub Copilot remote HTTP MCP endpoint — no binary to install,
+# no container changes needed. Claude Code connects to the remote server
+# directly using the GitHub token for authentication.
 #
 # Prerequisites:
-#   GITHUB_TOKEN set in your shell
+#   GITHUB_TOKEN set in your shell (must have repo + copilot scope)
 #   gcloud auth application-default login
 
 tasks:
@@ -57,17 +55,17 @@ agents:
     #   - id: my-tool@my-org
     #     github: my-org/my-claude-skill
     #
-    # The agent below uses a locally installed skill AND an MCP server.
+    # The agent below uses a locally installed skill AND a remote HTTP MCP server.
     skills:
       - superpowers@claude-plugins-official   # local: from ~/.claude/plugins/cache/
-    # MCP servers = separate processes Claude Code launches inside the container.
-    # Starlight generates a fresh settings.json for this agent only.
+    # HTTP MCP server — Claude Code connects to the remote endpoint directly.
+    # No binary install needed; credentials go in headers.
     mcp_servers:
       github:
-        command: npx
-        args: ["-y", "@modelcontextprotocol/server-github"]
-        env:
-          GITHUB_TOKEN: ${GITHUB_TOKEN}
+        type: http
+        url: https://api.githubcopilot.com/mcp
+        headers:
+          Authorization: "Bearer ${GITHUB_TOKEN}"
     volumes:
       ${PWD}: /repo
       ${HOME}/.config/gcloud/application_default_credentials.json: /tmp/adc.json

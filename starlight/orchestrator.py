@@ -229,12 +229,20 @@ class Orchestrator:
                 if enabled:
                     settings["enabledPlugins"] = enabled
             if agent.mcp_servers:
+                def _srv_config(srv) -> dict:
+                    if srv.type == "http":
+                        cfg: dict = {"type": "http", "url": srv.url}
+                        if srv.headers:
+                            cfg["headers"] = srv.headers
+                        return cfg
+                    # stdio (default)
+                    cfg = {"command": srv.command, "args": srv.args}
+                    if srv.env:
+                        cfg["env"] = srv.env
+                    return cfg
+
                 settings["mcpServers"] = {
-                    name: {
-                        "command": srv.command,
-                        "args": srv.args,
-                        **({"env": srv.env} if srv.env else {}),
-                    }
+                    name: _srv_config(srv)
                     for name, srv in agent.mcp_servers.items()
                 }
             settings_file = agent_work_dir / "_claude_settings.json"

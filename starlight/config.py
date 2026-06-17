@@ -24,31 +24,63 @@ class TaskConfig(BaseModel):
 
 
 class McpServerConfig(BaseModel):
-    """Full MCP server launch specification.
+    """MCP server configuration. Two transport types are supported:
 
-    The server binary is installed inside the container at startup by the
-    entrypoint — no pre-built image is required.
+    **stdio** (default) — Claude Code launches the server as a local subprocess.
+    The binary is installed at container startup automatically.
 
-    For `command: npx` the npm package is auto-detected from the first
-    non-flag argument. Set `install` explicitly for other package managers
-    or to override the auto-detection.
+        mcp_servers:
+          jira:
+            command: npx
+            args: ["-y", "@modelcontextprotocol/server-atlassian"]
+            env:
+              JIRA_API_TOKEN: ${JIRA_API_TOKEN}
+
+    **http** — Claude Code connects to a remote MCP server over HTTP.
+    No binary installation is needed; `command` and `args` are ignored.
+
+        mcp_servers:
+          github:
+            type: http
+            url: https://api.githubcopilot.com/mcp
+            headers:
+              Authorization: "Bearer ${GITHUB_TOKEN}"
     """
-    command: str
+    type: Literal["stdio", "http"] = "stdio"
+    # stdio fields
+    command: Optional[str] = None
     args: list[str] = []
     env: dict[str, str] = {}
-    install: Optional[str] = None  # npm package to install; auto-detected for npx
+    install: Optional[str] = None   # npm package; auto-detected for npx
+    # http fields
+    url: Optional[str] = None
+    headers: dict[str, str] = {}
 
     @field_validator("env", mode="before")
     @classmethod
     def interpolate_env(cls, v: dict) -> dict:
         return {k: _interpolate(str(val)) for k, val in (v or {}).items()}
 
+    @field_validator("headers", mode="before")
+    @classmethod
+    def interpolate_headers(cls, v: dict) -> dict:
+        return {k: _interpolate(str(val)) for k, val in (v or {}).items()}
+
+    @model_validator(mode="after")
+    def check_type_fields(self):
+        if self.type == "stdio" and not self.command:
+            raise ValueError("stdio MCP server requires 'command'")
+        if self.type == "http" and not self.url:
+            raise ValueError("http MCP server requires 'url'")
+        return self
+
     def npm_package(self) -> Optional[str]:
-        """Return the npm package to install, or None if nothing should be installed."""
+        """Return the npm package to install, or None (http servers need no install)."""
+        if self.type == "http":
+            return None
         if self.install is not None:
-            return self.install or None  # empty string means "skip install"
+            return self.install or None
         if self.command == "npx":
-            # npx -y @scope/package → first non-flag arg is the package
             for arg in self.args:
                 if not arg.startswith("-"):
                     return arg
