@@ -1,0 +1,95 @@
+version: "1"
+name: Python Agent vs Claude Code
+
+# Compares the custom Python agent (docker/python-agent/) against the
+# standard Claude Code agent on the same coding task.
+#
+# The Python agent runs agent.py directly — it implements its own agentic
+# loop using the Anthropic SDK, exports OTel spans for each tool call, and
+# prints the final response to stdout.
+#
+# Build the Python agent image:
+#   podman build -t starlight-python-agent:local docker/python-agent/
+#
+# Customise docker/python-agent/agent.py to implement your own agent logic:
+#   - Add tools to TOOLS and execute_tool()
+#   - Change the model, system prompt, or loop logic
+#   - Install additional packages in the Dockerfile
+#
+# Prerequisites:
+#   podman build -t starlight-claude-code:local docker/claude-code/
+#   podman build -t starlight-python-agent:local docker/python-agent/
+#   gcloud auth application-default login
+
+tasks:
+  - id: explain-orchestrator
+    tags: [smoke, reading]
+    prompt: >
+      Read the file /repo/starlight/orchestrator.py using your file reading tools.
+      Then explain in plain English: what the Orchestrator class does, what its
+      public interface is, and what happens if a container times out mid-run.
+      Print your explanation to STDOUT. No code needed — prose only.
+    ground_truth: >
+      Accurate description covering: Orchestrator creates a network and OTel
+      Collector sidecar, runs all agents concurrently per task, stops the
+      collector to flush traces, runs GPA evaluation, then cleans up the network.
+      Correctly identifies that container timeouts kill the container and return
+      a failed AgentRun with an error message rather than crashing the whole run.
+    timeout_minutes: 6
+
+  - id: write-helper
+    tags: [coding]
+    prompt: >
+      Read /repo/starlight/report.py using your file reading tools. Find the
+      _bar() function. Write a new Python function called bar_width(score, max_score)
+      that returns just the integer number of filled blocks (0-8) without the
+      surrounding text. Include a docstring and three example assertions.
+      Print the complete function to STDOUT.
+    ground_truth: >
+      A syntactically correct Python function called bar_width(score, max_score)
+      that returns an integer 0-8 using round((score / max_score) * 8).
+      Handles None input (returns 0). Docstring present. Three example assertions
+      that would pass if run.
+    timeout_minutes: 5
+
+agents:
+  - id: python-agent
+    runtime: custom
+    image: starlight-python-agent:local
+    volumes:
+      ${PWD}: /repo
+      ${HOME}/.config/gcloud/application_default_credentials.json: /tmp/adc.json
+    env:
+      ANTHROPIC_VERTEX_PROJECT_ID: ${GOOGLE_CLOUD_PROJECT}
+      CLOUD_ML_REGION: us-east5
+      GOOGLE_APPLICATION_CREDENTIALS: /tmp/adc.json
+      CLAUDE_MODEL: claude-sonnet-4-6
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://starlight-collector:4318"
+      OTEL_SERVICE_NAME: python-agent
+
+  - id: claude-code-agent
+    runtime: claude-code
+    model: claude-sonnet-4-6
+    volumes:
+      ${PWD}: /repo
+      ${HOME}/.config/gcloud/application_default_credentials.json: /tmp/adc.json
+    env:
+      ANTHROPIC_VERTEX_PROJECT_ID: ${GOOGLE_CLOUD_PROJECT}
+      CLOUD_ML_REGION: us-east5
+      CLAUDE_CODE_USE_VERTEX: "1"
+      GOOGLE_APPLICATION_CREDENTIALS: /tmp/adc.json
+
+evaluation:
+  provider: vertex
+  judge_model: claude-sonnet-4-6
+  vertex_project: ${GOOGLE_CLOUD_PROJECT}
+  vertex_region: us-east5
+  metrics: all
+  pass_threshold: 2.0
+
+container:
+  runtime: auto
+
+output:
+  format: auto
+  file: results/python-agent.json
